@@ -3,7 +3,8 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
-
+#include "kernel/stat.h"   // for fstat()/T_DEVICE
+ 
 // Parsed command representation
 #define EXEC  1
 #define REDIR 2
@@ -13,9 +14,7 @@
 
 #define MAXARGS 10
 
-struct cmd {
-  int type;
-};
+struct cmd { int type; };
 
 struct execcmd {
   int type;
@@ -49,10 +48,53 @@ struct backcmd {
   struct cmd *cmd;
 };
 
-int fork1(void);  // Fork but panics on failure.
+int fork1(void);
 void panic(char*);
 struct cmd *parsecmd(char*);
 void runcmd(struct cmd*) __attribute__((noreturn));
+
+// ---- tiny history (last 16 commands) ----
+#define HN 16
+static char hist[HN][100];
+static int  hcnt = 0;
+
+// ---- helpers: no <string.h> in xv6 ----
+static void safecpy(char *dst, const char *src, int n){
+  int i = 0;
+  if(n <= 0) return;
+  for(; i < n-1 && src[i]; i++) dst[i] = src[i];
+  dst[i] = 0;
+}
+
+static int startswith(const char *s, const char *p){
+  while(*p){
+    if(*s != *p) return 0;
+    s++; p++;
+  }
+  return 1;
+}
+// ---------------------------------------
+
+
+static void addhist(char *s){
+  int n = strlen(s);
+  // drop trailing newline for storage/echoing back
+  if(n > 0 && s[n-1] == '\n') s[n-1] = 0;
+  safecpy(hist[hcnt % HN], s, sizeof(hist[0]));
+  hcnt++;
+}
+
+static void showhist(void){
+  int start = hcnt > HN ? hcnt - HN : 0;
+  for(int i = start; i < hcnt; i++)
+    printf("%d %s\n", i + 1, hist[i % HN]);
+}
+
+
+// -----------------------------------------
+
+// interactive prompt flag (set in main via fstat)
+static int g_interactive = 0;
 
 // Execute cmd.  Never returns.
 void
@@ -134,7 +176,8 @@ runcmd(struct cmd *cmd)
 int
 getcmd(char *buf, int nbuf)
 {
-  write(2, "$ ", 2);
+  if(g_interactive)
+    write(2, "$ ", 2);
   memset(buf, 0, nbuf);
   gets(buf, nbuf);
   if(buf[0] == 0) // EOF
@@ -156,23 +199,55 @@ main(void)
     }
   }
 
+  // detect interactive session (stdin is a device/console)
+  struct stat st;
+  if(fstat(0, &st) >= 0 && st.type == T_DEVICE)
+    g_interactive = 1;
+
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
     char *cmd = buf;
+
+    // trim leading spaces/tabs
     while (*cmd == ' ' || *cmd == '\t')
       cmd++;
-    if (*cmd == '\n') // is a blank command
+    if (*cmd == '\n' || *cmd == 0)
       continue;
+
+    // history expansion: !!
+    if(cmd[0]=='!' && cmd[1]=='!' && (cmd[2]==0 || cmd[2]=='\n')){
+      if(hcnt == 0){
+        printf("no history\n");
+        continue;
+      }
+      // replace buffer with last command, echo it
+      safecpy(buf, hist[(hcnt-1) % HN], sizeof(buf));
+      printf("%s\n", buf);
+      cmd = buf;
+    }
+
+    // record command into history (after !! expansion)
+    addhist(cmd);
+
+    // builtins handled in the parent
     if(cmd[0] == 'c' && cmd[1] == 'd' && cmd[2] == ' '){
-      // Chdir must be called by the parent, not the child.
       cmd[strlen(cmd)-1] = 0;  // chop \n
       if(chdir(cmd+3) < 0)
         fprintf(2, "cannot cd %s\n", cmd+3);
-    } else {
-      if(fork1() == 0)
-        runcmd(parsecmd(cmd));
-      wait(0);
+      continue;
     }
+    if(startswith(cmd, "history")){
+      showhist();
+      continue;
+    }
+    if(startswith(cmd, "wait") && (cmd[4]==0 || cmd[4]=='\n' || cmd[4]==' ')){
+      while(wait(0) > 0) ;
+      continue;
+    }
+
+    if(fork1() == 0)
+      runcmd(parsecmd(cmd));
+    wait(0);
   }
   exit(0);
 }
@@ -187,9 +262,7 @@ panic(char *s)
 int
 fork1(void)
 {
-  int pid;
-
-  pid = fork();
+  int pid = fork();
   if(pid == -1)
     panic("fork");
   return pid;
@@ -198,23 +271,17 @@ fork1(void)
 //PAGEBREAK!
 // Constructors
 
-struct cmd*
-execcmd(void)
+struct cmd* execcmd(void)
 {
-  struct execcmd *cmd;
-
-  cmd = malloc(sizeof(*cmd));
+  struct execcmd *cmd = malloc(sizeof(*cmd));
   memset(cmd, 0, sizeof(*cmd));
   cmd->type = EXEC;
   return (struct cmd*)cmd;
 }
 
-struct cmd*
-redircmd(struct cmd *subcmd, char *file, char *efile, int mode, int fd)
+struct cmd* redircmd(struct cmd *subcmd, char *file, char *efile, int mode, int fd)
 {
-  struct redircmd *cmd;
-
-  cmd = malloc(sizeof(*cmd));
+  struct redircmd *cmd = malloc(sizeof(*cmd));
   memset(cmd, 0, sizeof(*cmd));
   cmd->type = REDIR;
   cmd->cmd = subcmd;
@@ -225,12 +292,9 @@ redircmd(struct cmd *subcmd, char *file, char *efile, int mode, int fd)
   return (struct cmd*)cmd;
 }
 
-struct cmd*
-pipecmd(struct cmd *left, struct cmd *right)
+struct cmd* pipecmd(struct cmd *left, struct cmd *right)
 {
-  struct pipecmd *cmd;
-
-  cmd = malloc(sizeof(*cmd));
+  struct pipecmd *cmd = malloc(sizeof(*cmd));
   memset(cmd, 0, sizeof(*cmd));
   cmd->type = PIPE;
   cmd->left = left;
@@ -238,12 +302,9 @@ pipecmd(struct cmd *left, struct cmd *right)
   return (struct cmd*)cmd;
 }
 
-struct cmd*
-listcmd(struct cmd *left, struct cmd *right)
+struct cmd* listcmd(struct cmd *left, struct cmd *right)
 {
-  struct listcmd *cmd;
-
-  cmd = malloc(sizeof(*cmd));
+  struct listcmd *cmd = malloc(sizeof(*cmd));
   memset(cmd, 0, sizeof(*cmd));
   cmd->type = LIST;
   cmd->left = left;
@@ -251,17 +312,15 @@ listcmd(struct cmd *left, struct cmd *right)
   return (struct cmd*)cmd;
 }
 
-struct cmd*
-backcmd(struct cmd *subcmd)
+struct cmd* backcmd(struct cmd *subcmd)
 {
-  struct backcmd *cmd;
-
-  cmd = malloc(sizeof(*cmd));
+  struct backcmd *cmd = malloc(sizeof(*cmd));
   memset(cmd, 0, sizeof(*cmd));
   cmd->type = BACK;
   cmd->cmd = subcmd;
   return (struct cmd*)cmd;
 }
+
 //PAGEBREAK!
 // Parsing
 
@@ -271,14 +330,11 @@ char symbols[] = "<|>&;()";
 int
 gettoken(char **ps, char *es, char **q, char **eq)
 {
-  char *s;
+  char *s = *ps;
   int ret;
 
-  s = *ps;
-  while(s < es && strchr(whitespace, *s))
-    s++;
-  if(q)
-    *q = s;
+  while(s < es && strchr(whitespace, *s)) s++;
+  if(q) *q = s;
   ret = *s;
   switch(*s){
   case 0:
@@ -293,22 +349,16 @@ gettoken(char **ps, char *es, char **q, char **eq)
     break;
   case '>':
     s++;
-    if(*s == '>'){
-      ret = '+';
-      s++;
-    }
+    if(*s == '>'){ ret = '+'; s++; }
     break;
   default:
     ret = 'a';
-    while(s < es && !strchr(whitespace, *s) && !strchr(symbols, *s))
-      s++;
+    while(s < es && !strchr(whitespace, *s) && !strchr(symbols, *s)) s++;
     break;
   }
-  if(eq)
-    *eq = s;
+  if(eq) *eq = s;
 
-  while(s < es && strchr(whitespace, *s))
-    s++;
+  while(s < es && strchr(whitespace, *s)) s++;
   *ps = s;
   return ret;
 }
@@ -316,11 +366,8 @@ gettoken(char **ps, char *es, char **q, char **eq)
 int
 peek(char **ps, char *es, char *toks)
 {
-  char *s;
-
-  s = *ps;
-  while(s < es && strchr(whitespace, *s))
-    s++;
+  char *s = *ps;
+  while(s < es && strchr(whitespace, *s)) s++;
   *ps = s;
   return *s && strchr(toks, *s);
 }
@@ -333,11 +380,8 @@ struct cmd *nulterminate(struct cmd*);
 struct cmd*
 parsecmd(char *s)
 {
-  char *es;
-  struct cmd *cmd;
-
-  es = s + strlen(s);
-  cmd = parseline(&s, es);
+  char *es = s + strlen(s);
+  struct cmd *cmd = parseline(&s, es);
   peek(&s, es, "");
   if(s != es){
     fprintf(2, "leftovers: %s\n", s);
@@ -350,9 +394,7 @@ parsecmd(char *s)
 struct cmd*
 parseline(char **ps, char *es)
 {
-  struct cmd *cmd;
-
-  cmd = parsepipe(ps, es);
+  struct cmd *cmd = parsepipe(ps, es);
   while(peek(ps, es, "&")){
     gettoken(ps, es, 0, 0);
     cmd = backcmd(cmd);
@@ -367,9 +409,7 @@ parseline(char **ps, char *es)
 struct cmd*
 parsepipe(char **ps, char *es)
 {
-  struct cmd *cmd;
-
-  cmd = parseexec(ps, es);
+  struct cmd *cmd = parseexec(ps, es);
   if(peek(ps, es, "|")){
     gettoken(ps, es, 0, 0);
     cmd = pipecmd(cmd, parsepipe(ps, es));
@@ -405,12 +445,10 @@ parseredirs(struct cmd *cmd, char **ps, char *es)
 struct cmd*
 parseblock(char **ps, char *es)
 {
-  struct cmd *cmd;
-
   if(!peek(ps, es, "("))
     panic("parseblock");
   gettoken(ps, es, 0, 0);
-  cmd = parseline(ps, es);
+  struct cmd *cmd = parseline(ps, es);
   if(!peek(ps, es, ")"))
     panic("syntax - missing )");
   gettoken(ps, es, 0, 0);
