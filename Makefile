@@ -187,6 +187,7 @@ UPROGS=\
 	$U/_mkdir\
 	$U/_rm\
 	$U/_sh\
+	$U/_attack\
 	$U/_stressfs\
 	$U/_usertests\
 	$U/_grind\
@@ -194,6 +195,7 @@ UPROGS=\
 	$U/_zombie\
 	$U/_logstress\
 	$U/_forphan\
+	$U/_sandbox\
 	$U/_dorphan\
 
 

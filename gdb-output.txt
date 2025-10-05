@@ -1,0 +1,23 @@
+Breakpoint 1 at 0x80001c6e: file kernel/syscall.c, line 133.
+Continuing.
+[Switching to Thread 1.2]
+
+Thread 2 hit Breakpoint 1, syscall () at kernel/syscall.c:133
+133	{
+#0  syscall () at kernel/syscall.c:133
+#1  0x0000000080001a2c in usertrap () at kernel/trap.c:68
+#2  0x0000003ffffff09c in ?? ()
+135	  struct proc *p = myproc();
+137	  num = p->trapframe->a7;
+138	  if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+$1 = (struct proc *) 0x80007cf0 <proc>
+$2 = "init", '\000' <repeats 11 times>
+$3 = 0x1
+$4 = 0x87f56000
+$5 = 0xf
+$6 = 15
+$7 = 0x200000022
+$8 = 0
+Warning: 'set logging off', an alias for the command 'set logging enabled', is deprecated.
+Use 'set logging enabled off'.
+

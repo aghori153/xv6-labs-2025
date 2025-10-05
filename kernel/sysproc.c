@@ -1,3 +1,6 @@
+
+
+
 #include "types.h"
 #include "riscv.h"
 #include "defs.h"
@@ -104,4 +107,24 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+// set sandbox mask and allowed path for current process
+uint64
+sys_interpose(void)
+{
+  int mask;
+  char path[128];
+
+  /* argint is void: call it to fill mask */
+  argint(0, &mask);
+
+  /* argstr returns -1 on error */
+  if (argstr(1, path, sizeof(path)) < 0)
+    return -1;
+
+  struct proc *p = myproc();
+  p->mask = mask;
+  /* safestrcpy declared in defs.h */
+  safestrcpy(p->allowed, path, sizeof(p->allowed));
+  return 0;
 }

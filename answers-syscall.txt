@@ -1,0 +1,28 @@
+Q1: Looking at the backtrace output, which function called syscall?
+A1: The backtrace shows that syscall() was invoked from usertrap(). (Backtrace: syscall() <- usertrap() ...)
+
+Q2: After stepping past `struct proc *p = myproc();`, what is the value of p->trapframe->a7 and what does that value represent?
+A2: p->trapframe->a7 = 0xF (hex) = 15 (decimal).
+    This value is the syscall number (placed into register a7 by the user-space syscall stub). 
+    In this xv6 run a7 = 15 indicates the trapping user thread was performing syscall number 15.
+
+Q3: What was the previous mode that the CPU was in?
+A3: sstatus = 0x200000022.
+    The SPP bit test ($sstatus & 0x100) returned 0, therefore the previous CPU mode was **user mode (U-mode)**.
+
+Q4: Kernel panic exercise — which instruction did the kernel panic at and which register corresponds to `num`?
+A4: The kernel faulted at the deliberately-inserted load `num = *(int *)0;` at address **0x80001c7e** (kernel/syscall.c, the temporary instruction we inserted).
+    This attempted dereference of virtual address 0 caused a kernel page-fault (`kerneltrap`).
+    The C variable `num` is the local intended to hold the syscall number (normally sourced from `p->trapframe->a7`). At the point of the crash we executed a store/load into `num` (the faulting load). To determine the exact hardware register or stack slot used for `num` in this build you can run, at the stopped breakpoint:
+      - `info locals`  (shows compiler-assigned locations for local variables)
+      - `info registers` (shows register contents)
+      - `p &num` and then `x /x <addr>` if `num` resides on the stack
+    (I did not capture `info locals`/`info registers` in this run; the above commands will show the exact location.)
+
+Q5: Which process was running when the kernel panicked?
+A5: p->name = "init"
+    p->pid  = 1
+
+Notes / short explanation:
+- The `a7` register is the canonical place xv6 user stubs put the syscall number (RISC-V calling convention for this lab). The kernel reads that via `p->trapframe->a7`.
+- The panic exercise intentionally dereferences address 0 to produce a page fault; the sepc printed by the kernel points to the instruction address (we inspected it with gdb at 0x80001c7e).
