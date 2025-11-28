@@ -47,10 +47,10 @@ usertrap(void)
   w_stvec((uint64)kernelvec);  //DOC: kernelvec
 
   struct proc *p = myproc();
-  
+
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
+
   if(r_scause() == 8){
     // system call
 
@@ -68,6 +68,9 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+    if(which_dev == 2) {
+      yield();
+    }
   } else if((r_scause() == 15 || r_scause() == 13) &&
             vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0) != 0) {
     // page fault on lazily-allocated page
@@ -119,7 +122,7 @@ prepare_return(void)
 
   // set up the registers that trampoline.S's sret will use
   // to get to user space.
-  
+
   // set S Previous Privilege mode to User.
   unsigned long x = r_sstatus();
   x &= ~SSTATUS_SPP; // clear SPP to 0 for user mode
@@ -139,7 +142,7 @@ kerneltrap()
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
-  
+
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
   if(intr_get() != 0)
@@ -170,7 +173,24 @@ clockintr()
     wakeup(&ticks);
     release(&tickslock);
   }
+  struct proc *proc = myproc();
 
+  if (proc && proc->alarm_enabled && proc->alarm_interval > 0) {
+    proc->alarm_ticks--;
+
+    if (proc->alarm_ticks <= 0) {
+      if (!proc->alarm_trapframe)
+        proc->alarm_trapframe = kalloc();
+
+      if (proc->alarm_trapframe) {
+        memmove(proc->alarm_trapframe, proc->trapframe, sizeof(struct trapframe));
+
+        proc->trapframe->epc = (uint64)proc->alarm_handler;
+        proc->alarm_enabled = 0;
+        proc->alarm_ticks = proc->alarm_interval;
+      }
+    }
+  }
   // ask for the next timer interrupt. this also clears
   // the interrupt request. 1000000 is about a tenth
   // of a second.
@@ -216,4 +236,3 @@ devintr()
     return 0;
   }
 }
-

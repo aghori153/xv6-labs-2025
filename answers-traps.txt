@@ -1,0 +1,13 @@
+-Function arguments in RISC-V are passed in registers a0–a7, and in main’s call to printf, the value 13 is held in a2.
+
+-The functions f and g do not appear as calls in the assembly for main because the compiler inlines both, so there is no jal or jalr instruction targeting them.
+
+-The printf function is located at 0x0000000000000640 in user/call.asm.
+
+-Immediately after the jalr to printf, the return address stored in ra is the address of the next instruction, which is 0x38.
+
+-In the code snippet with i = 0x00646c72, the output is “He110 World” because 57616 prints as e110, and due to little-endian byte order, the bytes of i (72 6c 64 00) map to the string "rld".
+
+-On a big-endian machine, to get the same output, i should be set to 0x726c6400, and the integer 57616 does not change because register-passed integers are unaffected by endianness.
+
+-In the call printf("x=%d y=%d", 3);, the value printed after y= is an unpredictable garbage value because printf expects two integers but only one is supplied, causing undefined behavior as it reads a random leftover value from a register or the stack.
