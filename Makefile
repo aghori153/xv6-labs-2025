@@ -143,6 +143,15 @@ UPROGS=\
 	$U/_logstress\
 	$U/_forphan\
 	$U/_dorphan\
+		$U/_hello\
+	$U/_find\
+	$U/_pingpong\
+	$U/_testsyscalls\
+	$U/_procinfo\
+	$U/_cpuburn\
+	$U/_ioyield\
+	$U/_iopipe\
+	$U/_boosttest
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

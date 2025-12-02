@@ -101,7 +101,9 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
-
+extern uint64 sys_getsyscallcount(void);
+extern uint64 sys_getprocinfo(void);
+extern uint64 sys_boostproc(void);
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
 static uint64 (*syscalls[])(void) = {
@@ -126,6 +128,9 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_getsyscallcount] sys_getsyscallcount,
+[SYS_getprocinfo] sys_getprocinfo,
+[SYS_boostproc]  sys_boostproc,
 };
 
 void
@@ -143,5 +148,7 @@ syscall(void)
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);
     p->trapframe->a0 = -1;
+p->syscall_count++;
+
   }
 }
